@@ -1926,9 +1926,6 @@ function updateReliabilityScrolly(currentDesignY) {
     }
 
     if (title !== null) {
-        /* Keep the title fixed and visible while the speech card travels over it.
-           Only after the card has left the viewport do we fade the title/layer,
-           revealing the next uncertainty screen underneath. */
         const titleFade = 1 - smoothStep(0.90, 1.0, progress);
         title.style.transform = "translate3d(0, 0, 0)";
         title.style.opacity = (cardHasLeft ? titleFade : 1).toFixed(3);
@@ -1950,7 +1947,7 @@ function makeUncertaintyTypesGeneralCard() {
 
 function makeUncertaintyTypesDataCard() {
     const card = makeElement("section", "text-card uncertainty-types-card");
-    card.appendChild(makeElement("p", "", "This study also has uncertainty"));
+    card.appendChild(makeElement("p", "", "The data in this study also has uncertainty"));
     card.setAttribute("aria-hidden", "true");
     return card;
 }
