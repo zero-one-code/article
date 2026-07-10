@@ -40,10 +40,15 @@ const navSections = [
 
 const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+function isMobileLayout() {
+    return window.matchMedia("(max-width: 767px)").matches;
+}
+
 const scrollState = {
     targetDesignY: 0,
     currentDesignY: 0,
-    rafId: null
+    rafId: null,
+    lastFrameTime: null
 };
 
 function readDesignScrollY() {
@@ -70,8 +75,26 @@ function getScenePinnedState(currentDesignY, pinStart, pinEnd) {
     return actualPinned || visualPinned;
 }
 
+function ensureSceneHandoffVeil() {
+    let veil = document.querySelector(".scene-handoff-veil");
+
+    if (veil === null) {
+        veil = makeElement("div", "scene-handoff-veil");
+        document.body.appendChild(veil);
+    }
+
+    return veil;
+}
+
+function setSceneHandoffVeil(opacity) {
+    const veil = ensureSceneHandoffVeil();
+    const safeOpacity = clamp(opacity || 0, 0, 1);
+    veil.style.opacity = safeOpacity.toFixed(3);
+}
+
 function updateScrollDrivenScenes(currentDesignY) {
     updateProgressRail();
+    updateMobileHeroLayer(currentDesignY);
     updateDiseaseScrolly(currentDesignY);
     updateRiskScrolly(currentDesignY);
     updateVaccinationScrolly(currentDesignY);
@@ -90,35 +113,63 @@ function requestScrollSceneFrame() {
     scrollState.rafId = requestAnimationFrame(tickScrollScenes);
 }
 
-function tickScrollScenes() {
+function tickScrollScenes(timestamp) {
     scrollState.rafId = null;
+
+    if (scrollState.lastFrameTime === null || typeof timestamp !== "number") {
+        scrollState.lastFrameTime = timestamp;
+    }
+    let dt = (typeof timestamp === "number") ? (timestamp - scrollState.lastFrameTime) : 16.667;
+    scrollState.lastFrameTime = timestamp;
+    if (!(dt > 0)) {
+        dt = 16.667;
+    }
+
+    if (dt > 50) {
+        dt = 50;
+    }
 
     const diff = scrollState.targetDesignY - scrollState.currentDesignY;
     if (prefersReducedMotion || Math.abs(diff) < 0.35) {
         scrollState.currentDesignY = scrollState.targetDesignY;
     } else {
         const distance = Math.abs(diff);
-        const speed = distance > 2600 ? 0.62 : distance > 1400 ? 0.46 : distance > 620 ? 0.28 : 0.16;
-        scrollState.currentDesignY += diff * speed;
+        const baseFraction = distance > 2600
+            ? MOTION.scrollCatchupLarge
+            : distance > 1400
+                ? MOTION.scrollCatchupMedium
+                : distance > 620
+                    ? MOTION.scrollCatchupSmall
+                    : MOTION.scrollCatchupFine;
+        const factor = 1 - Math.pow(1 - baseFraction, dt / (1000 / 60));
+        scrollState.currentDesignY += diff * factor;
     }
 
     updateScrollDrivenScenes(scrollState.currentDesignY);
 
     if (Math.abs(scrollState.targetDesignY - scrollState.currentDesignY) >= 0.35) {
         requestScrollSceneFrame();
+    } else {
+        scrollState.lastFrameTime = null;
     }
 }
 
+const scaleCache = {
+    scale: 1,
+    pinScale: 1,
+    pinOffsetY: 0
+};
+
 function getScale() {
-    return parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--scale")) || 1;
+    return scaleCache.scale;
 }
 
 function getPinScale() {
-    return parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--pin-scale")) || getScale();
+    return scaleCache.pinScale;
 }
 
 function getPinOffsetY() {
-    return parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--pin-offset-y")) || 0;
+    return scaleCache.pinOffsetY;
 }
 
 function getMatchedPinTop(pinOffset, staticY, pinnedY) {
@@ -154,6 +205,10 @@ function updateScale() {
     const stageScale = Math.min(1, window.innerWidth / designWidth);
     const pinScale = Math.min(1, window.innerWidth / designWidth, window.innerHeight / 1080);
     const pinOffsetY = Math.max(0, (window.innerHeight - (1080 * pinScale)) / 2);
+
+    scaleCache.scale = stageScale;
+    scaleCache.pinScale = pinScale;
+    scaleCache.pinOffsetY = pinOffsetY;
 
     document.documentElement.style.setProperty("--scale", stageScale.toFixed(5));
     document.documentElement.style.setProperty("--pin-scale", pinScale.toFixed(5));
@@ -560,6 +615,36 @@ function smoothStep(edge0, edge1, value) {
     return progress * progress * (3 - (2 * progress));
 }
 
+const MOTION = {
+    speechStartY: 940,
+    speechEndY: -430,
+    speechFadeInStart: 0.025,
+    speechFadeInEnd: 0.135,
+    speechFadeOutStart: 0.855,
+    speechFadeOutEnd: 0.985,
+    scrollCatchupLarge: 0.72,
+    scrollCatchupMedium: 0.52,
+    scrollCatchupSmall: 0.30,
+    scrollCatchupFine: 0.18
+};
+
+function easeScrollMotion(value) {
+    const t = clamp(value, 0, 1);
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+function setHybridSpeechCardMotion(card, progress, startY, endY, fadeOutStart) {
+    const safeProgress = clamp(progress, 0, 1);
+    const eased = smoothStep(0, 1, safeProgress);
+    const y = lerp(startY, endY, eased);
+    const fadeIn = smoothStep(MOTION.speechFadeInStart, MOTION.speechFadeInEnd, safeProgress);
+    const fadeOut = 1 - smoothStep(fadeOutStart, MOTION.speechFadeOutEnd, safeProgress);
+    const opacity = Math.min(fadeIn, fadeOut);
+
+    card.style.opacity = opacity.toFixed(3);
+    card.style.transform = `translate3d(0, ${y.toFixed(2)}px, 0)`;
+}
+
 function makeDiseaseCard(html, className) {
     const card = makeElement("section", "text-card disease-card " + className);
     card.appendChild(makeElement("p", "", html));
@@ -614,10 +699,10 @@ function createDiseasePinLayer() {
 }
 
 function addDiseaseScrollScene(sectionName, absoluteTop) {
-    const sceneHeight = 2200;
+    const sceneHeight = 2800;
     const pinOffset = 150;
-    const pinDuration = 1900;
-    const transitionOutStart = 0.94;
+    const pinDuration = 2500;
+    const transitionOutStart = 0.84;
     const scene = makeElement("div", "disease-scrolly");
     scene.dataset.absoluteTop = String(absoluteTop);
     scene.dataset.sceneHeight = String(sceneHeight);
@@ -634,14 +719,7 @@ function addDiseaseScrollScene(sectionName, absoluteTop) {
 }
 
 function setDiseaseCardScrollPosition(card, progress) {
-    const eased = smoothStep(0, 1, progress);
-    const y = lerp(940, -260, eased);
-    const fadeIn = smoothStep(0.02, 0.14, progress);
-    const fadeOut = 1 - smoothStep(0.84, 0.99, progress);
-    const opacity = Math.min(fadeIn, fadeOut);
-
-    card.style.opacity = opacity.toFixed(3);
-    card.style.transform = `translate3d(0, ${y.toFixed(2)}px, 0)`;
+    setHybridSpeechCardMotion(card, progress, MOTION.speechStartY, -260, 0.84);
 }
 
 function updateDiseaseScrolly(currentDesignY) {
@@ -662,7 +740,7 @@ function updateDiseaseScrolly(currentDesignY) {
     const pinEnd = pinStart + pinDuration;
     const overallProgress = clamp((currentDesignY - pinStart) / pinDuration, 0, 1);
     const isPinned = getScenePinnedState(currentDesignY, pinStart, pinEnd);
-    const transitionProgress = smoothStep(transitionOutStart, 1, overallProgress);
+    const transitionProgress = smoothStep(transitionOutStart, 0.93, overallProgress);
     const contentOpacity = isPinned ? (1 - transitionProgress) : 0;
     const staticLayer = scene.querySelector(".disease-static-layer");
     const content = pinLayer.querySelector(".disease-pin-content");
@@ -673,14 +751,17 @@ function updateDiseaseScrolly(currentDesignY) {
     pinLayer.style.opacity = isPinned ? "1" : "0";
 
     if (content !== null) {
-        /* Use the same width-based scale as the static canvas layer while the
-           disease diagram is pinned. Without this, --pin-scale may become
-           smaller than --scale on short browser windows, causing a visible
-           "snap smaller" at the sticky handoff. */
-        const diseaseScale = getScale();
-        content.style.top = `${Math.round(getMatchedPinTopForScale(pinOffset, 10, 160, diseaseScale))}px`;
+        const diseaseBlur = lerp(0, 1.15, transitionProgress);
+        if (isMobileLayout()) {
+            content.style.top = `${Math.round(getPinOffsetY())}px`;
+            content.style.transform = "translate3d(-50%, 0, 0) scale(var(--pin-scale))";
+        } else {
+            const diseaseScale = getScale();
+            content.style.top = `${Math.round(getMatchedPinTopForScale(pinOffset, 10, 160, diseaseScale))}px`;
+            content.style.transform = "translateX(-50%) scale(var(--scale))";
+        }
         content.style.opacity = contentOpacity.toFixed(3);
-        content.style.transform = "translateX(-50%) scale(var(--scale))";
+        content.style.filter = `blur(${diseaseBlur.toFixed(2)}px)`;
     }
 
     if (staticLayer !== null) {
@@ -688,11 +769,11 @@ function updateDiseaseScrolly(currentDesignY) {
     }
 
     if (firstCard !== null) {
-        setDiseaseCardScrollPosition(firstCard, clamp(overallProgress / 0.58, 0, 1));
+    setDiseaseCardScrollPosition(firstCard, clamp((overallProgress - 0.02) / 0.42, 0, 1));
     }
 
     if (secondCard !== null) {
-        setDiseaseCardScrollPosition(secondCard, clamp((overallProgress - 0.36) / 0.56, 0, 1));
+        setDiseaseCardScrollPosition(secondCard, clamp((overallProgress - 0.54) / 0.42, 0, 1));
     }
 }
 
@@ -771,14 +852,7 @@ function addRiskScrollScene(sectionName, absoluteTop) {
 }
 
 function setRiskCardScrollPosition(card, progress) {
-    const eased = smoothStep(0, 1, progress);
-    const y = lerp(940, -340, eased);
-    const fadeIn = smoothStep(0.02, 0.14, progress);
-    const fadeOut = 1 - smoothStep(0.88, 1.0, progress);
-    const opacity = Math.min(fadeIn, fadeOut);
-
-    card.style.opacity = opacity.toFixed(3);
-    card.style.transform = `translate3d(0, ${y.toFixed(2)}px, 0)`;
+    setHybridSpeechCardMotion(card, progress, MOTION.speechStartY, -340, 0.88);
 }
 
 function updateRiskScrolly(currentDesignY) {
@@ -801,38 +875,84 @@ function updateRiskScrolly(currentDesignY) {
     const isPinned = getScenePinnedState(currentDesignY, pinStart, pinEnd);
     const sceneBottom = sceneTop + parseFloat(scene.dataset.sceneHeight || "0");
     const shouldKeepStaticHidden = currentDesignY >= pinStart && currentDesignY < sceneBottom;
-    const contentOpacity = isPinned ? 1 : 0;
+    const diseaseScene = document.querySelector(".disease-scrolly");
+    let riskHandoffOpacity = 1;
+
+    if (diseaseScene !== null) {
+        const diseaseTop = parseFloat(diseaseScene.dataset.absoluteTop || "0");
+        const diseasePinOffset = parseFloat(diseaseScene.dataset.pinOffset || "0");
+        const diseasePinDuration = parseFloat(diseaseScene.dataset.pinDuration || "1");
+        const diseasePinStart = diseaseTop - diseasePinOffset;
+        const riskHandoffStartY = diseasePinStart + (diseasePinDuration * 0.86);
+        const riskHandoffEndY = diseasePinStart + (diseasePinDuration * 0.985);
+        const veilInY = diseasePinStart + (diseasePinDuration * 0.84);
+        const veilPeakY = diseasePinStart + (diseasePinDuration * 0.91);
+        const veilOutY = diseasePinStart + (diseasePinDuration * 0.99);
+        const veilIn = smoothStep(veilInY, veilPeakY, currentDesignY);
+        const veilOut = 1 - smoothStep(veilPeakY, veilOutY, currentDesignY);
+        const veilOpacity = Math.min(veilIn, veilOut) * 0.72;
+
+        riskHandoffOpacity = smoothStep(riskHandoffStartY, riskHandoffEndY, currentDesignY);
+        setSceneHandoffVeil(veilOpacity);
+    }
+
+    if (diseaseScene === null) {
+        setSceneHandoffVeil(0);
+    }
+
+    const contentOpacity = isPinned ? riskHandoffOpacity : 0;
     const staticLayer = scene.querySelector(".risk-static-layer");
     const content = pinLayer.querySelector(".risk-pin-content");
+    const riskTitle = pinLayer.querySelector(".risk-title");
+    const riskImage = pinLayer.querySelector(".risk-base-image");
     const firstCard = pinLayer.querySelector(".risk-card-one");
     const secondCard = pinLayer.querySelector(".risk-card-two");
 
     pinLayer.classList.toggle("is-active", isPinned);
     pinLayer.style.opacity = isPinned ? "1" : "0";
 
+    const firstCardStart = 0.34;
+    const firstCardEnd = 0.60;
+    const secondCardStart = 0.62;
+    const secondCardEnd = 0.88;
+    const sceneExitStart = 0.89;
+    const sceneExitEnd = 0.98;
+
     if (content !== null) {
-        /* Fade the risk-group screen out before the vaccination scene starts.
-           The old version lifted the artwork by hundreds of pixels at the end,
-           which made the transition feel like a jump. A shallow lift plus a
-           wider opacity ramp reads as a page-to-page dissolve instead. */
-        const exitLift = smoothStep(0.82, 0.96, overallProgress);
-        const exitY = Math.round(lerp(0, -36, exitLift));
-        const riskOpacity = contentOpacity * (1 - smoothStep(0.78, 0.96, overallProgress));
-        content.style.top = `${Math.round(getMatchedPinTop(pinOffset, 72, 72))}px`;
+        const exitLift = smoothStep(sceneExitStart, sceneExitEnd, overallProgress);
+        const exitY = Math.round(lerp(0, -30, exitLift));
+        const enterY = Math.round(lerp(16, 0, riskHandoffOpacity));
+        const riskFadeIn = smoothStep(0.00, 0.20, overallProgress);
+        const riskFadeOut = 1 - smoothStep(sceneExitStart, sceneExitEnd, overallProgress);
+        const riskOpacity = contentOpacity * riskFadeIn * riskFadeOut;
+        const incomingBlur = lerp(5.5, 0, Math.min(riskHandoffOpacity, riskFadeIn));
+        content.style.top = isMobileLayout()
+            ? `${Math.round(getPinOffsetY())}px`
+            : `${Math.round(getMatchedPinTop(pinOffset, 72, 72))}px`;
         content.style.opacity = riskOpacity.toFixed(3);
-        content.style.transform = `translate3d(-50%, ${exitY}px, 0) scale(var(--pin-scale))`;
+        content.style.transform = `translate3d(-50%, ${enterY + exitY}px, 0) scale(var(--pin-scale))`;
+
+        if (riskTitle !== null) {
+            riskTitle.style.filter = `blur(${incomingBlur.toFixed(2)}px)`;
+        }
+        if (riskImage !== null) {
+            riskImage.style.filter = `blur(${incomingBlur.toFixed(2)}px)`;
+        }
     }
 
     if (staticLayer !== null) {
         staticLayer.classList.toggle("is-hidden", shouldKeepStaticHidden);
+        staticLayer.style.opacity = shouldKeepStaticHidden ? "0" : riskHandoffOpacity.toFixed(3);
     }
 
     if (firstCard !== null) {
-        setRiskCardScrollPosition(firstCard, clamp((overallProgress - 0.02) / 0.56, 0, 1));
+        const firstCardProgress = clamp((overallProgress - firstCardStart) / (firstCardEnd - firstCardStart), 0, 1);
+        setRiskCardScrollPosition(firstCard, firstCardProgress);
     }
 
     if (secondCard !== null) {
-        setRiskCardScrollPosition(secondCard, clamp((overallProgress - 0.38) / 0.56, 0, 1));
+        const secondCardProgress = clamp((overallProgress - secondCardStart) / (secondCardEnd - secondCardStart), 0, 1);
+        setRiskCardScrollPosition(secondCard, secondCardProgress);
     }
 }
 
@@ -915,20 +1035,20 @@ function createVaccinePinLayer() {
     content.appendChild(plots);
 
     const sourceCard = makeVaccineCard(
-        "Here, we walk through a study data<br>on the effectiveness and safety<br>of the herpes zoster vaccine.",
+        "Here, we walk through data from studies on the effectiveness and safety of the herpes zoster vaccine in adults aged 60 years and older for 3.1 years.",
         "vaccine-card-source",
         "Source: Cochrane Database of Systematic reviews (2023)"
     );
     content.appendChild(sourceCard);
 
     const comparisonCard = makeVaccineCard(
-        "This data compares the number of herpes zoster cases<br>and serious adverse effects among vaccinated individuals versus those in a placebo group who did not receive the actual vaccine but were given a harmless substance.",
+        "This data compares the number of herpes zoster cases and serious adverse effects between the vaccine group and the placebo group who did not receive the actual vaccine but were given a harmless substance.",
         "vaccine-card-comparison"
     );
     content.appendChild(comparisonCard);
 
     const comparisonDetailCard = makeVaccineCard(
-        "The study results are shown as the number of cases<br>per 1,000 healthy adults aged 60 or older.<br>Participants were followed for an average of 3.1 years.",
+        "The clinical trial findings are shown as the number of people affected per 1000 participants, to facilitate comparison between the vaccine and placebo groups.",
         "vaccine-card-detail"
     );
     content.appendChild(comparisonDetailCard);
@@ -954,26 +1074,12 @@ function addVaccinationScrollScene(sectionName, absoluteTop) {
 }
 
 function setVaccineCardScrollPosition(card, progress, startY, endY) {
-    const eased = smoothStep(0, 1, progress);
-    const y = lerp(startY, endY, eased);
-    const fadeIn = smoothStep(0.03, 0.16, progress);
-    const fadeOut = 1 - smoothStep(0.84, 0.995, progress);
-    const opacity = Math.min(fadeIn, fadeOut);
-
-    card.style.opacity = opacity.toFixed(3);
-    card.style.transform = `translate3d(0, ${y.toFixed(2)}px, 0)`;
+    setHybridSpeechCardMotion(card, progress, startY, endY, 0.84);
 }
 
 function setOpaqueSpeechCardScrollPosition(card, progress, startY, endY) {
-    const eased = smoothStep(0, 1, progress);
-    const y = lerp(startY, endY, eased);
-    const fadeIn = smoothStep(0.005, 0.055, progress);
-    const fadeOut = 1 - smoothStep(0.925, 0.995, progress);
-    const opacity = Math.min(fadeIn, fadeOut);
-
-    card.style.opacity = opacity.toFixed(3);
+    setHybridSpeechCardMotion(card, progress, startY, endY, 0.925);
     card.style.background = '#ffffff';
-    card.style.transform = `translate3d(0, ${y.toFixed(2)}px, 0)`;
 }
 
 function updateVaccinationScrolly(currentDesignY) {
@@ -1032,15 +1138,15 @@ function updateVaccinationScrolly(currentDesignY) {
     }
 
     if (sourceCard !== null) {
-        setVaccineCardScrollPosition(sourceCard, clamp((overallProgress - 0.16) / 0.22, 0, 1), 980, -280);
+    setVaccineCardScrollPosition(sourceCard, clamp((overallProgress - 0.12) / 0.28, 0, 1), 940, -340);
     }
 
     if (comparisonCard !== null) {
-        setVaccineCardScrollPosition(comparisonCard, clamp((overallProgress - 0.60) / 0.18, 0, 1), 980, -290);
+        setVaccineCardScrollPosition(comparisonCard, clamp((overallProgress - 0.40) / 0.36, 0, 1), 940, -340);
     }
 
     if (comparisonDetailCard !== null) {
-        setVaccineCardScrollPosition(comparisonDetailCard, clamp((overallProgress - 0.78) / 0.18, 0, 1), 980, -300);
+        setVaccineCardScrollPosition(comparisonDetailCard, clamp((overallProgress - 0.76) / 0.36, 0, 1), 940, -340);
     }
 }
 
@@ -1048,7 +1154,7 @@ function updateVaccinationScrolly(currentDesignY) {
 function makeEffectivenessQuestionBlock() {
     const block = makeElement("div", "effectiveness-question-block");
 
-    const title = makeElement("h2", "title section-title effectiveness-question-title", "How <span class=\"blue\">Effective</span> is Vaccination?");
+    const title = makeElement("h2", "title section-title effectiveness-question-title", "The <span class=\"blue\">Effectiveness</span> of Vaccination");
     setBox(title, 500, 0, 920);
     block.appendChild(title);
 
@@ -1149,10 +1255,6 @@ function setEffectivenessSummaryCardState(card, progress) {
         return;
     }
 
-    /* Wait until every comparison element is visible, then bring the card up
-       from below. The comparison background is held until this card has fully
-       travelled out of the viewport, so the transition feels like a single
-       Reuters-style overlay step rather than an early crossfade. */
     const holdY = 430;
     const enterProgress = smoothStep(0.948, 0.968, progress);
     const exitProgress = smoothStep(0.968, 0.996, progress);
@@ -1198,14 +1300,14 @@ function createEffectivenessPinLayer() {
     content.appendChild(placeboChart);
 
     const placeboCard = makeEffectivenessPinnedCard(
-        "The results of the study suggest that<br>about <span class=\"red\">33</span> in every 1000 people<br>who do not receive the vaccine<br>may get herpes zoster.",
+        "The study suggests that among people who do not receive the vaccine, about <span class=\"red\">33</span> per 1000 may develop herpes zoster.",
         "effectiveness-placebo-card"
     );
     content.appendChild(placeboCard);
 
 
     const vaccinatedCard = makeEffectivenessPinnedCard(
-        "Approximately <span class=\"red\">16</span> in every 1000 people who<br>receive the vaccine may get herpes zoster.",
+        "It was estimated that about <span class=\"red\">16</span> out of every 1000 people who receive the vaccine would develop herpes zoster.",
         "effectiveness-vaccinated-card"
     );
     content.appendChild(vaccinatedCard);
@@ -1236,8 +1338,14 @@ function applyDotMorph(plot, progress, options) {
     }
 
     const dots = plot.querySelectorAll(".dot, .mini-dot");
-    const plotWidth = parseFloat(getComputedStyle(plot).width) || 830;
-    const plotHeight = parseFloat(getComputedStyle(plot).height) || 515;
+    let plotWidth = parseFloat(plot.dataset.cachedWidth || "0");
+    let plotHeight = parseFloat(plot.dataset.cachedHeight || "0");
+    if (!(plotWidth > 0) || !(plotHeight > 0)) {
+        plotWidth = plot.offsetWidth || 830;
+        plotHeight = plot.offsetHeight || 515;
+        plot.dataset.cachedWidth = String(plotWidth);
+        plot.dataset.cachedHeight = String(plotHeight);
+    }
     const clusterX = options && options.clusterX !== undefined ? options.clusterX : plotWidth / 2;
     const clusterY = options && options.clusterY !== undefined ? options.clusterY : plotHeight / 2;
     const clusterRadius = options && options.radius !== undefined ? options.radius : 42;
@@ -1521,14 +1629,6 @@ function setUnifiedEffectivenessChartState(chart, progress) {
         return;
     }
 
-    /*
-     * Single-chart phase schedule:
-     *  - compact dots expand into placebo grid
-     *  - mean/legend count up only after the grid is fully formed
-     *  - message card passes over the stable chart
-     *  - the same chart changes copy/count to the vaccinated group
-     *  - vaccinated card passes, then the chart quietly hands off to compare
-     */
     const mode = progress < 0.620 ? "placebo" : "vaccinated";
     updateEffectivenessChartContent(chart, mode);
 
@@ -1926,9 +2026,6 @@ function updateReliabilityScrolly(currentDesignY) {
     }
 
     if (title !== null) {
-        /* Keep the title fixed and visible while the speech card travels over it.
-           Only after the card has left the viewport do we fade the title/layer,
-           revealing the next uncertainty screen underneath. */
         const titleFade = 1 - smoothStep(0.90, 1.0, progress);
         title.style.transform = "translate3d(0, 0, 0)";
         title.style.opacity = (cardHasLeft ? titleFade : 1).toFixed(3);
@@ -2114,7 +2211,7 @@ function updateUncertaintyTypesScrolly(currentDesignY) {
     }
 
     if (uncertaintyImage !== null) {
-        const imageIn = smoothStep(0.02, 0.08, progress);
+        const imageIn = smoothStep(0.14, 0.28, progress);
         const imageOut = 1 - smoothStep(0.36, 0.40, progress);
         const imageOpacity = Math.min(imageIn, imageOut);
         uncertaintyImage.style.opacity = imageOpacity.toFixed(3);
@@ -2122,11 +2219,11 @@ function updateUncertaintyTypesScrolly(currentDesignY) {
     }
 
     if (generalCard !== null) {
-        setOpaqueSpeechCardScrollPosition(generalCard, clamp((progress - 0.11) / 0.12, 0, 1), 1080, -430);
+        setOpaqueSpeechCardScrollPosition(generalCard, clamp((progress - 0.09) / 0.22, 0, 1), 1080, -260);
     }
 
     if (dataCard !== null) {
-        setVaccineCardScrollPosition(dataCard, clamp((progress - 0.235) / 0.105, 0, 1), 1080, -430);
+        setVaccineCardScrollPosition(dataCard, clamp((progress - 0.34) / 0.13, 0, 1), 1080, -260);
     }
 
     if (sampleImage !== null) {
@@ -2142,7 +2239,7 @@ function updateUncertaintyTypesScrolly(currentDesignY) {
     }
 
     if (sampleCard !== null) {
-        setVaccineCardScrollPosition(sampleCard, clamp((progress - 0.485) / 0.105, 0, 1), 1080, -430);
+    setVaccineCardScrollPosition(sampleCard, clamp((progress - 0.455) / 0.22, 0, 1), 1080, -260);
     }
 
     if (multipleImage !== null) {
@@ -2154,23 +2251,27 @@ function updateUncertaintyTypesScrolly(currentDesignY) {
     }
 
     if (thereforeCard !== null) {
-        setVaccineCardScrollPosition(thereforeCard, clamp((progress - 0.71) / 0.095, 0, 1), 1080, -430);
+    setVaccineCardScrollPosition(thereforeCard, clamp((progress - 0.68) / 0.22, 0, 1), 1080, -260);
     }
 
     if (confidenceImage !== null) {
-        const confidenceIn = smoothStep(0.84, 0.885, progress);
-        const confidenceOut = 1 - smoothStep(0.935, 0.960, progress);
+        const confidenceIn = smoothStep(5040, 5360, scrollDist);
+        const confidenceOut = 1 - smoothStep(7140, 7420, scrollDist);
         const confidenceOpacity = Math.min(confidenceIn, confidenceOut);
         confidenceImage.style.opacity = confidenceOpacity.toFixed(3);
         confidenceImage.style.transform = `translate3d(0, ${Math.round(lerp(16, 0, confidenceIn))}px, 0) scale(${(0.985 + confidenceIn * 0.015).toFixed(4)})`;
     }
 
     if (confidenceCard !== null) {
-        setVaccineCardScrollPosition(confidenceCard, clamp((progress - 0.885) / 0.065, 0, 1), 1080, -430);
+        setVaccineCardScrollPosition(confidenceCard, clamp((scrollDist - 5520) / 1280, 0, 1), 1080, -260);
     }
 
     if (likelyRangeIntroCard !== null) {
-        setVaccineCardScrollPosition(likelyRangeIntroCard, clamp((scrollDist - 5760) / 2000, 0, 1), 1080, -430);
+        setOpaqueSpeechCardScrollPosition(likelyRangeIntroCard, clamp((scrollDist - 6780) / 980, 0, 1), 1080, -430);
+    }
+
+    if (pinLayer !== null) {
+        pinLayer.style.background = scrollDist >= 7530 ? "transparent" : "#ffffff";
     }
 }
 
@@ -2365,7 +2466,7 @@ function createEffectivenessRangePinLayer() {
     content.appendChild(compareOverallCard);
 
     const safetyIntro = makeElement('div', 'effectiveness-range-safety-intro');
-    const safetyIntroTitle = makeElement('h2', 'title section-title', 'How <span class="blue">Safe</span> is Vaccination?');
+    const safetyIntroTitle = makeElement('h2', 'title section-title', 'The <span class="blue">Safety</span> of Vaccination');
     const safetyIntroSub = makeElement('p', 'subtitle', 'How many people experienced a serious adverse effect<br>in the placebo group and in the vaccinated group?');
     safetyIntro.appendChild(safetyIntroTitle);
     safetyIntro.appendChild(safetyIntroSub);
@@ -2409,13 +2510,15 @@ function updateEffectivenessRangeScrolly(currentDesignY) {
 
     const pinStart = sceneTop - pinOffset;
     const pinEnd = pinStart + pinDuration;
+    const preRevealStart = pinStart - 430;
+    const preRevealEnd = pinStart - 80;
     const buildDuration = 5000;
     const scrollDist = progressDesignY - pinStart;
     const overallProgress = clamp(scrollDist / pinDuration, 0, 1);
     const progress = clamp(scrollDist / buildDuration, 0, 1);
     const outroDuration = Math.max(1, pinDuration - buildDuration);
     const outroProgress = clamp((scrollDist - buildDuration) / outroDuration, 0, 1);
-    const isPinned = getScenePinnedState(currentDesignY, pinStart, pinEnd);
+    const isPinned = getScenePinnedState(currentDesignY, preRevealStart, pinEnd);
 
     const content = pinLayer.querySelector('.effectiveness-range-pin-content');
     const placeboChart = pinLayer.querySelector('.likely-range-pinned-chart--placebo');
@@ -2426,7 +2529,8 @@ function updateEffectivenessRangeScrolly(currentDesignY) {
     const compareOverallCard = pinLayer.querySelector('.effectiveness-range-pinned-card--compare-overall');
     const rangeCompare = pinLayer.querySelector('.effectiveness-range-pinned-compare');
 
-    const layerFadeIn = smoothStep(0.00, 0.02, overallProgress);
+    const preRevealOpacity = smoothStep(preRevealStart, preRevealEnd, progressDesignY);
+    const layerFadeIn = scrollDist < 0 ? preRevealOpacity : Math.max(preRevealOpacity, smoothStep(0.00, 0.02, overallProgress));
     const layerOpacity = isPinned ? layerFadeIn : 0;
 
     pinLayer.classList.toggle('is-active', isPinned);
@@ -2563,8 +2667,8 @@ function updateEffectivenessRangeScrolly(currentDesignY) {
     };
 
     setPinnedRangeChartState(placeboChart, {
-        revealStart: 0.00,
-        revealEnd: 0.06,
+        revealStart: -0.07,
+        revealEnd: 0.00,
         dotStart: 0.04,
         dotEnd: 0.20,
         rangeVisualStart: 0.23,
@@ -2647,6 +2751,66 @@ function updateEffectivenessRangeScrolly(currentDesignY) {
     }
 }
 
+
+function createMobileHeroLayer() {
+    const existingLayer = document.querySelector(".mobile-hero-layer");
+
+    if (existingLayer !== null) {
+        return existingLayer;
+    }
+
+    const layer = makeElement("div", "mobile-hero-layer");
+    const content = makeElement("div", "mobile-hero-content");
+    const title = makeElement("h1", "title main-title", "How Effective and Safe is<br>the Herpes Zoster<br>Vaccine?");
+    setBox(title, 455, 399, 1010);
+    content.appendChild(title);
+
+    const hint = makeElement("div", "mobile-scroll-hint", "Scroll Down<span aria-hidden=\"true\">↓</span>");
+    hint.setAttribute("aria-hidden", "true");
+
+    layer.appendChild(content);
+    layer.appendChild(hint);
+    document.body.appendChild(layer);
+    return layer;
+}
+
+function updateMobileHeroLayer(currentDesignY) {
+    const layer = document.querySelector(".mobile-hero-layer");
+
+    if (layer === null) {
+        return;
+    }
+
+    if (!isMobileLayout()) {
+        layer.classList.remove("is-active");
+        layer.style.opacity = "0";
+        return;
+    }
+
+    const firstPinnedScene = document.querySelector(".disease-scrolly");
+    const firstSceneTop = firstPinnedScene !== null
+        ? parseFloat(firstPinnedScene.dataset.absoluteTop || "1260")
+        : 1260;
+    const firstPinOffset = firstPinnedScene !== null
+        ? parseFloat(firstPinnedScene.dataset.pinOffset || "150")
+        : 150;
+    const heroEnd = firstSceneTop - firstPinOffset;
+    const actualDesignY = readDesignScrollY();
+    const heroProgressY = Math.max(currentDesignY || 0, actualDesignY || 0);
+    const isActive = heroProgressY < heroEnd;
+    const fadeOut = smoothStep(heroEnd - 260, heroEnd, heroProgressY);
+    const opacity = isActive ? (1 - fadeOut) : 0;
+    const content = layer.querySelector(".mobile-hero-content");
+
+    layer.classList.toggle("is-active", opacity > 0.01);
+    layer.style.opacity = opacity.toFixed(3);
+
+    if (content !== null) {
+        content.style.top = `${Math.round(getPinOffsetY())}px`;
+        content.style.opacity = opacity.toFixed(3);
+    }
+}
+
 function scrollToBurden() {
     const scene = document.querySelector(".disease-scrolly");
 
@@ -2694,7 +2858,7 @@ function renderSafety() {
         legend: "Case of serious adverse effect",
         hasRange: false
     });
-    addCard("safety", "The results of the study suggest that<br>about <span class=\"purple\">22</span> in every 1000 people<br>who do not receive the vaccine<br>had serious adverse events.", 29155);
+    addCard("safety", "The study shows that about <span class=\"purple\">22</span> in every 1000 people who do not receive the vaccine had serious adverse events.", 29155);
 
     addChart("safety", {
         top: 29810,
@@ -2705,7 +2869,7 @@ function renderSafety() {
         legend: "Case of serious adverse effect",
         hasRange: false
     });
-    addCard("safety", "The results of the study suggest that<br>about <span class=\"purple\">23</span> in every 1000 people<br>who receive the vaccine<br>had serious adverse events.", 30695);
+    addCard("safety", "The study shows that<br>about <span class=\"purple\">23</span> in every 1000 people<br>who receive the vaccine<br>had serious adverse events.", 30695);
     addCard("safety", "Then, what is the range of values<br>where the true value in the whole population<br>is likely to be?", 31426);
 
     addChart("safety", {
@@ -2761,11 +2925,6 @@ function renderSafety() {
 
 function renderClosing() {
     addCard("closing", "However, vaccination decisions be considered<br>alongside individual factors such as age, immune<br>status, and medical history into account,<br>as well as these study results.", 37421);
-
-    /*
-     * The closing illustration and messages keep the existing DOM structure,
-     * but the vertical spacing follows the closing layout in 146.svg.
-     */
     addImage("closing", "own_factors_transparent_highres.png", "Personal factors for vaccination decision", 435, 37787, 1050, 847, "own-factors");
     addCard("closing", "This is because vaccination<br>may or may not be necessary to prevent infection<br>depending on the individual.", 38699);
     addParagraph("closing", "Thank you for reading the article.<br>Please return to the original survey page<br>and answer the questions.", "closing final-message", 260, 39357, 1400);
@@ -2860,8 +3019,8 @@ function setupRevealObserver() {
         });
     }, {
         root: null,
-        rootMargin: "0px 0px -12% 0px",
-        threshold: 0.12
+        rootMargin: "0px 0px -16% 0px",
+        threshold: 0.10
     });
 
     document.querySelectorAll(".reveal, .reveal-card, .reveal-scale").forEach((element, index) => {
@@ -2878,8 +3037,8 @@ function setupRevealObserver() {
         });
     }, {
         root: null,
-        rootMargin: "0px 0px -18% 0px",
-        threshold: 0.22
+        rootMargin: "0px 0px -20% 0px",
+        threshold: 0.18
     });
 
     document.querySelectorAll(".dot-plot, .mini-dot-plot").forEach((plot) => {
@@ -2950,13 +3109,13 @@ const SAFETY_SCENE_DEFS = [
     {
         id: 'sfa-1', kind: 'chart',
         chart: { title: 'Serious Adverse Effect<br>in the <span class="blue">Placebo</span> Group', count: 22, colour: 'purple', mean: 22, hasRange: false },
-        bubbles: ['The results of the study suggest that<br>about <span class="purple">22</span> in every 1000 people<br>who do not receive the vaccine<br>had serious adverse events.']
+        bubbles: ['The study shows that<br>about <span class="purple">22</span> in every 1000 people<br>who do not receive the vaccine<br>had serious adverse events.']
     },
     {
         id: 'sfa-2', kind: 'chart',
         chart: { title: 'Serious Adverse Effect<br>in the <span class="blue">Vaccinated</span> Group', count: 23, colour: 'purple', mean: 23, hasRange: false },
         bubbles: [
-            'The results of the study suggest that<br>about <span class="purple">23</span> in every 1000 people<br>who receive the vaccine<br>had serious adverse events.',
+            'The study shows that<br>about <span class="purple">23</span> in every 1000 people<br>who receive the vaccine<br>had serious adverse events.',
             'Then, what is the range of values<br>where the true value in the whole population<br>is likely to be?'
         ]
     },
@@ -3328,7 +3487,8 @@ function buildSafetyScenes() {
 
     const msgDef = SAFETY_SCENE_DEFS[SAFETY_SCENE_DEFS.length - 1];
     const designViewport = window.innerHeight / getScale();
-    const totalDesign = Math.max(72000, msgDef._top + PAGE_MESSAGE_REVEAL + designViewport + 500);
+    const messageRevealEnd = msgDef._top + PAGE_MESSAGE_REVEAL;
+    const totalDesign = messageRevealEnd + 800 + designViewport;
     const canvas = document.getElementById('canvas');
     const stage = document.getElementById('stage');
     if (canvas !== null) {
@@ -3361,7 +3521,7 @@ function addScrollTopButton() {
 }
 
 function applyResponsiveCardSizing() {
-    const pinScale = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--pin-scale')) || 1;
+    const pinScale = getPinScale();
     const isMobile = window.innerWidth < 768;
     let cardW;
     let cardLeft;
@@ -3387,6 +3547,7 @@ function applyResponsiveCardSizing() {
 
 function renderArticle() {
     renderIntro();
+    createMobileHeroLayer();
     renderEffectiveness();
     renderUncertainty();
     renderEffectivenessRange();
@@ -3403,6 +3564,10 @@ function renderArticle() {
 
 window.addEventListener("resize", function () {
     updateScale();
+    document.querySelectorAll(".dot-plot, .mini-dot-plot").forEach(function (plot) {
+        delete plot.dataset.cachedWidth;
+        delete plot.dataset.cachedHeight;
+    });
     applyResponsiveCardSizing();
     syncScrollStateToWindow(true);
     updateScrollDrivenScenes(getAnimatedDesignY());

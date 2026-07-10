@@ -93,3 +93,37 @@ Likely-range transition smoothing pass:
 - The Placebo likely-range chart is now handled by a single fixed pinned scene, with a higher z-index so it fully covers the preceding uncertainty sequence.
 - Dot expansion is scroll-tied using the same cluster-to-grid morphing pattern as the earlier placebo dot scene.
 - The 30~36 / Mean 33 count-up is also scroll-tied, and the explanatory card starts only after the chart, dots, and count-up have settled.
+
+
+Motion-only revision:
+- Rebased on the original article_v1 source instead of the simplified hybrid rewrite.
+- Preserved all original graphic construction, asset usage, dot/range/mean/arrow styling, and absolute layout coordinates.
+- Adjusted only scroll catch-up, speech-card easing, reveal timing, and transition curves to give the smoother hybrid-style interaction without changing visual design.
+
+Mobile pagination fix:
+- On narrow screens, the original long scaled canvas is now kept only as scroll space and hidden visually, preventing multiple desktop-design pages from appearing in one phone viewport.
+- Added a mobile-only fixed hero layer and centred the existing disease/risk pinned layers using the viewport-aware pin offset, so each mobile step appears as one centred page.
+- Extended the final pinned message scroll space so the thank-you / survey-return page remains reachable on mobile.
+
+### Mobile scroll cue update
+- Replaced the mobile-only pill-style cue with the same transparent “Scroll Down” text and arrow treatment used on desktop.
+- The cue is limited to the mobile hero layer and does not change the original graphic layout or dot/uncertainty visual design.
+
+
+## 2026-07-09 update — disease to risk handoff
+- Delayed the risk-group scene so it fades in only after the second herpes-zoster speech card has completed its upward motion.
+- Added a smooth handoff opacity between the disease scrolly section and the risk scrolly section.
+- Delayed the risk speech cards during the handoff so the risk title/graphic can appear first, then the risk cards begin afterward.
+
+## 2026-07-09 update — fade-through handoff refinement
+- Replaced the strong blur overlap between the herpes-zoster scene and the risk-group scene with a fade-through transition.
+- Added a lightweight white veil layer during the handoff to wash out the outgoing line-art scene before the incoming risk scene becomes fully sharp.
+- Reduced outgoing disease blur from a strong ghosting blur to a very subtle blur and opacity fade.
+- Moved the risk pin layer above the veil so the incoming risk graphic can sharpen cleanly without being washed out.
+- Kept the original graphic assets, layout coordinates, speech bubble styling, dot/range/uncertainty visuals unchanged.
+
+## 2026-07-09 update — uncertainty speech bubble spacing
+- Adjusted only the late uncertainty sequence timing shown in the user screenshot.
+- The confidence-interval speech card now starts after the previous multiple-samples / therefore card has finished exiting.
+- The final likely-range intro card now starts after the confidence-interval card exits, so the uncertainty section shows one speech card at a time.
+- Kept all image assets, card styling, dot/range/mean/uncertainty visuals, and layout coordinates unchanged.
