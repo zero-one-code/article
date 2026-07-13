@@ -685,6 +685,12 @@ const MOTION = {
     speechFadeInEnd: 0.135,
     speechFadeOutStart: 0.855,
     speechFadeOutEnd: 0.985,
+    mobileSpeechStartY: 1140,
+    mobileSpeechEndY: -900,
+    mobileSpeechFadeInStart: 0.025,
+    mobileSpeechFadeInEnd: 0.135,
+    mobileSpeechFadeOutStart: 0.855,
+    mobileSpeechFadeOutEnd: 0.985,
     scrollCatchupLarge: 0.72,
     scrollCatchupMedium: 0.52,
     scrollCatchupSmall: 0.30,
@@ -698,10 +704,19 @@ function easeScrollMotion(value) {
 
 function setHybridSpeechCardMotion(card, progress, startY, endY, fadeOutStart) {
     const safeProgress = clamp(progress, 0, 1);
+    const mobile = isMobileLayout();
+
+    const resolvedStartY = mobile ? MOTION.mobileSpeechStartY : startY;
+    const resolvedEndY = mobile ? MOTION.mobileSpeechEndY : endY;
+    const fadeInStart = mobile ? MOTION.mobileSpeechFadeInStart : MOTION.speechFadeInStart;
+    const fadeInEnd = mobile ? MOTION.mobileSpeechFadeInEnd : MOTION.speechFadeInEnd;
+    const resolvedFadeOutStart = mobile ? MOTION.mobileSpeechFadeOutStart : fadeOutStart;
+    const fadeOutEnd = mobile ? MOTION.mobileSpeechFadeOutEnd : MOTION.speechFadeOutEnd;
+
     const eased = smoothStep(0, 1, safeProgress);
-    const y = lerp(startY, endY, eased);
-    const fadeIn = smoothStep(MOTION.speechFadeInStart, MOTION.speechFadeInEnd, safeProgress);
-    const fadeOut = 1 - smoothStep(fadeOutStart, MOTION.speechFadeOutEnd, safeProgress);
+    const y = lerp(resolvedStartY, resolvedEndY, eased);
+    const fadeIn = smoothStep(fadeInStart, fadeInEnd, safeProgress);
+    const fadeOut = 1 - smoothStep(resolvedFadeOutStart, fadeOutEnd, safeProgress);
     const opacity = Math.min(fadeIn, fadeOut);
 
     card.style.opacity = opacity.toFixed(3);
@@ -3653,9 +3668,7 @@ function updatePinnedPage(def, currentDesignY, progressDesignY) {
             return;
         }
         const p = clamp((scrollDist - bubbleBase - (i * bubbleSpacing)) / bubbleTravel, 0, 1);
-        const mobileBubbleStartY = isMobileLayout() ? 1140 : 1080;
-        const mobileBubbleEndY = isMobileLayout() ? -1200 : -470;
-        setVaccineCardScrollPosition(card, p, mobileBubbleStartY, mobileBubbleEndY);
+        setVaccineCardScrollPosition(card, p, 1080, -470);
         card.style.opacity = (parseFloat(card.style.opacity || '0') * layerOpacity).toFixed(3);
     });
 }
