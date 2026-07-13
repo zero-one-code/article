@@ -361,7 +361,7 @@ function addScrollButton(sectionName) {
     const button = makeElement("button", "scroll-button", "Scroll Down<span aria-hidden=\"true\">↓</span>");
     button.type = "button";
     button.id = "scrollButton";
-    return appendElement(sectionName, button, 870, 910, 180);
+    return appendElement(sectionName, button, 870, 886, 180);
 }
 
 function addIntroPlots() {
@@ -686,7 +686,7 @@ const MOTION = {
     speechFadeOutStart: 0.855,
     speechFadeOutEnd: 0.985,
     mobileSpeechStartY: 1140,
-    mobileSpeechEndY: -900,
+    mobileSpeechEndY: -1200,
     mobileSpeechFadeInStart: 0.025,
     mobileSpeechFadeInEnd: 0.135,
     mobileSpeechFadeOutStart: 0.855,
