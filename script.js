@@ -3350,7 +3350,7 @@ const SAFETY_SCENE_DEFS = [
         id: 'decision-intro', kind: 'intro',
         overlapBefore: 900,
         title: 'Making a Vaccination <span class="blue">Decision</span>',
-        subtitle: 'How can this information support your vaccination decision?'
+        subtitle: 'How should the study findings be interpreted in vaccination decision-making'
     },
     {
         id: 'decision-conclusion', kind: 'bubbles',
