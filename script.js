@@ -3357,7 +3357,7 @@ const SAFETY_SCENE_DEFS = [
         bubbleSpacing: 1900,
         bubbleTravel: 2300,
         bubbles: [
-            'This study shows on average vaccination prevented about <span class=\"red\">17</span> cases of herpes zoster per 1,000 people, while there was no clear evidence of a difference in serious adverse events.'
+            'This study shows vaccination prevented the occurrence of herpes zoster, while there was no clear evidence of a difference in serious adverse events between groups.'
         ]
     },
     {
