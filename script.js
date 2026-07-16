@@ -3350,7 +3350,7 @@ const SAFETY_SCENE_DEFS = [
         id: 'decision-intro', kind: 'intro',
         overlapBefore: 900,
         title: 'Making a Vaccination <span class="blue">Decision</span>',
-        subtitle: 'How should the study findings be interpreted in vaccination decision-making'
+        subtitle: 'How should this study findings be interpreted in vaccination decision-making'
     },
     {
         id: 'decision-conclusion', kind: 'bubbles',
@@ -3368,7 +3368,7 @@ const SAFETY_SCENE_DEFS = [
         bubbleTravel: 2200,
         imageFile: 'own_factors_transparent_highres.png', imageAlt: 'Personal factors for vaccination decision',
         bubbles: [
-            'These findings describe average outcomes in the study population, and the expected benefit varies with personal risk of herpes zoster influenced by age, immune status, medical history.',
+            'However, these findings describe average outcomes in the study population, and the expected benefit varies with personal risk of herpes zoster influenced by age, immune status, medical history.',
             'Therefore, vaccination decisions can be better informed by weighing the expected benefits, possible harms, uncertainty, and individual context.'
         ]
     },
